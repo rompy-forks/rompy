@@ -6,7 +6,7 @@ from wavespectra import read_swan
 from rompy.core.time import TimeRange
 from rompy.swan.grid import SwanGrid
 from rompy.core.boundary import SourceFile, SourceIntake, SourceWavespectra
-from rompy.swan.boundary import Boundnest1
+from rompy.swan.boundary import Boundnest1, BoundspecSide
 
 
 HERE = Path(__file__).parent
@@ -19,7 +19,7 @@ def time():
 
 @pytest.fixture(scope="module")
 def grid():
-    yield SwanGrid(x0=110, y0=-30, dx=0.5, dy=0.5, nx=10, ny=10, rot=77)
+    yield SwanGrid(x0=110, y0=-30, dx=0.5, dy=0.5, nx=10, ny=10, rot=20)
 
 
 def test_source_wavespectra(tmp_path):
@@ -103,6 +103,20 @@ def test_data_boundary_spacing_lt_perimeter(tmp_path, time, grid):
         )
         bnd._filter_time(time=time)
         bnd.get(destdir=tmp_path, grid=grid)
+
+
+def test_boundspecside(tmp_path, time, grid):
+    bnd = BoundspecSide(
+        id="westaus",
+        source=SourceFile(
+            uri=HERE / "data/aus-20230101.nc",
+            kwargs=dict(engine="netcdf4"),
+        ),
+        sel_method="nearest",
+        tolerance=2.0,
+        location={"side": "west"},
+    )
+    bnd.get(destdir=tmp_path, grid=grid, time=time)
 
 
 def test_source_wavespectra_ploting(tmp_path):
