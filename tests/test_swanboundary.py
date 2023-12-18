@@ -6,7 +6,7 @@ from wavespectra import read_swan
 from rompy.core.time import TimeRange
 from rompy.swan.grid import SwanGrid
 from rompy.core.boundary import SourceFile, SourceIntake, SourceWavespectra
-from rompy.swan.boundary import Boundnest1, BoundspecSide
+from rompy.swan.boundary import Boundnest1, BoundspecSide, BoundspecSegmentXY
 
 
 HERE = Path(__file__).parent
@@ -115,6 +115,39 @@ def test_boundspecside(tmp_path, time, grid):
         sel_method="nearest",
         tolerance=2.0,
         location={"side": "west"},
+    )
+    bnd.get(destdir=tmp_path, grid=grid, time=time)
+
+
+def test_boundspecsegmentxy_from_side(tmp_path, time, grid):
+    bnd = BoundspecSegmentXY(
+        id="westaus",
+        source=SourceFile(
+            uri=HERE / "data/aus-20230101.nc",
+            kwargs=dict(engine="netcdf4"),
+        ),
+        sel_method="idw",
+        tolerance=3.0,
+        location={"model_type": "side", "side": "west"},
+    )
+    cmds = bnd.get(destdir=tmp_path, grid=grid, time=time)
+    # import ipdb; ipdb.set_trace()
+
+
+def test_boundspecsegmentxy_from_sides(tmp_path, time, grid):
+    bnd = BoundspecSegmentXY(
+        id="westaus",
+        source=SourceFile(
+            uri=HERE / "data/aus-20230101.nc",
+            kwargs=dict(engine="netcdf4"),
+        ),
+        sel_method="nearest",
+        tolerance=3.0,
+        location=
+            {
+                "model_type": "sides",
+                "sides": [{"side": "west"}, {"side": "south"}],
+            }
     )
     bnd.get(destdir=tmp_path, grid=grid, time=time)
 
