@@ -131,7 +131,6 @@ def test_boundspecsegmentxy_from_side(tmp_path, time, grid):
         location={"model_type": "side", "side": "west"},
     )
     cmds = bnd.get(destdir=tmp_path, grid=grid, time=time)
-    # import ipdb; ipdb.set_trace()
 
 
 def test_boundspecsegmentxy_from_sides(tmp_path, time, grid):
@@ -149,7 +148,7 @@ def test_boundspecsegmentxy_from_sides(tmp_path, time, grid):
                 "sides": [{"side": "west"}, {"side": "south"}],
             }
     )
-    bnd.get(destdir=tmp_path, grid=grid, time=time)
+    cmds = bnd.get(destdir=tmp_path, grid=grid, time=time)
 
 
 def test_source_wavespectra_ploting(tmp_path):
