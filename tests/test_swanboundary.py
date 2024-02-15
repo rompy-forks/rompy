@@ -57,7 +57,7 @@ def test_data_boundary_spacing_from_dataset(tmp_path, time, grid):
             kwargs=dict(engine="netcdf4"),
         ),
         sel_method="idw",
-        tolerance=2.0,
+        sel_method_kwargs={"tolerance": 2.0},
         rectangle="closed",
     )
     bnd._filter_time(time=time)
@@ -77,7 +77,7 @@ def test_data_boundary_custom_spacing(tmp_path, time, grid):
         ),
         spacing=1,
         sel_method="idw",
-        tolerance=2.0,
+        sel_method_kwargs={"tolerance": 2.0},
         rectangle="closed",
     )
     bnd._filter_time(time=time)
@@ -98,7 +98,7 @@ def test_data_boundary_spacing_lt_perimeter(tmp_path, time, grid):
             ),
             spacing=100,
             sel_method="idw",
-            tolerance=2.0,
+            sel_method_kwargs={"tolerance": 2.0},
             rectangle="closed",
         )
         bnd._filter_time(time=time)
@@ -113,7 +113,7 @@ def test_boundspecside(tmp_path, time, grid):
             kwargs=dict(engine="netcdf4"),
         ),
         sel_method="nearest",
-        tolerance=2.0,
+        sel_method_kwargs={"tolerance": 2.0},
         location={"side": "west"},
     )
     bnd.get(destdir=tmp_path, grid=grid, time=time)
@@ -127,7 +127,7 @@ def test_boundspecsegmentxy_from_side(tmp_path, time, grid):
             kwargs=dict(engine="netcdf4"),
         ),
         sel_method="idw",
-        tolerance=3.0,
+        sel_method_kwargs={"tolerance": 3.0},
         location={"model_type": "side", "side": "west"},
     )
     cmds = bnd.get(destdir=tmp_path, grid=grid, time=time)
@@ -141,7 +141,7 @@ def test_boundspecsegmentxy_from_sides(tmp_path, time, grid):
             kwargs=dict(engine="netcdf4"),
         ),
         sel_method="nearest",
-        tolerance=3.0,
+        sel_method_kwargs={"tolerance": 3.0},
         location=
             {
                 "model_type": "sides",
@@ -160,7 +160,7 @@ def test_source_wavespectra_ploting(tmp_path):
         ),
         spacing=1,
         sel_method="idw",
-        tolerance=2.0,
+        sel_method_kwargs={"tolerance": 2.0},
         rectangle="closed",
         coords={'x':'lon', 'y': 'lat'}
     ).plot()
