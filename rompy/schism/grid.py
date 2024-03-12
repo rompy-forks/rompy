@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pyschism.mesh import Hgrid
 from pyschism.mesh.prop import Tvdflag
 from pyschism.mesh.vgrid import Vgrid
@@ -15,14 +15,31 @@ from rompy.core.grid import BaseGrid
 
 logger = logging.getLogger(__name__)
 
-
 import os
 
 from pydantic import BaseModel, field_validator
 from pyschism.mesh.hgrid import Gr3
 
+G3ACCEPT = ["albedo", "diffmin", "diffmax", "watertype", "windrot_geo2proj"]
+G3WARN = ["manning", "rough", "drag"]
+G3FILES = G3ACCEPT + G3WARN
+GRIDLINKS = ["hgridll", "hgrid_WWM"]
 
-class GR3Generator(RompyBaseModel):
+
+class GeneratorBase(RompyBaseModel):
+    """Base class for all generators"""
+
+    _copied: str = PrivateAttr(default=None)
+
+    def generate(self, destdir: str | Path) -> Path:
+        raise NotImplementedError
+
+    def get(self, destdir: str | Path, name: str = None) -> Path:
+        """Alias to maintain api compatibility with DataBlob"""
+        return self.generate(destdir, name=name)
+
+
+class GR3Generator(GeneratorBase):
     hgrid: DataBlob | Path = Field(..., description="Path to hgrid.gr3 file")
     gr3_type: str = Field(
         ...,
@@ -33,13 +50,11 @@ class GR3Generator(RompyBaseModel):
 
     @field_validator("gr3_type")
     def gr3_type_validator(cls, v):
-        accept = ["albedo", "diffmin", "diffmax", "watertype", "windrot_geo2proj"]
-        warn = ["manning", "rough", "drag"]
-        if v not in accept + warn:
+        if v not in G3FILES:
             raise ValueError(
                 "gr3_type must be one of 'albedo', 'diffmin', 'diffmax', 'watertype', 'windrot_geo2proj'"
             )
-        if v in warn:
+        if v in G3WARN:
             logger.warning(
                 f"{v} is being set to a constant value, this is not recommended. For best results, please supply friction gr3 files with spatially varying values. Further options are under development."
             )
@@ -49,10 +64,10 @@ class GR3Generator(RompyBaseModel):
     def id(self):
         return self.gr3_type
 
-    def generate_gr3(self, destdir: str | Path) -> Path:
+    def generate(self, destdir: str | Path, name: str = None) -> Path:
         if isinstance(self.hgrid, DataBlob):
             if not self.hgrid._copied:
-                self.hgrid.get(destdir)
+                self.hgrid.get(destdir, name="hgrid.gr3")
             ref = self.hgrid._copied
         else:
             ref = self.hgrid
@@ -63,66 +78,198 @@ class GR3Generator(RompyBaseModel):
         grd.nodes.values[:] = self.value
         grd.write(dest, overwrite=True)
         logger.info(f"Generated {self.gr3_type} with constant value of {self.value}")
+        self._copied = dest
         return dest
 
-    def get(self, destdir: str | Path) -> Path:
-        """Alias to maintain api compatibility with DataBlob"""
-        return self.generate_gr3(destdir)
+
+class VgridGenerator(GeneratorBase):
+    """
+    Generate vgrid.in.
+    This is all hardcoded for now, may look at making this more flexible in the future.
+    """
+
+    def generate(self, destdir: str | Path, name: str = None) -> Path:
+        dest = Path(destdir) / "vgrid.in"
+        with open(dest, "w") as f:
+            f.write("2 !ivcor (1: LSC2; 2: SZ) ; type of mesh you are using\n")
+            f.write(
+                "2 1 1000000  !nvrt (# of S-levels) (=Nz); kz (# of Z-levels); hs (transition depth between S and Z); large in this case because is 2D implementation\n"
+            )
+            f.write("Z levels   !Z-levels in the lower portion\n")
+            f.write(
+                "1 -1000000   !level index, z-coordinates !use very large value for 2D; if 3D would have a list of z-levels here\n"
+            )
+            f.write("S levels      !S-levels\n")
+            f.write(
+                "40.0 1.0 0.0001  ! constants used in S-transformation: hc, theta_b, theta_f\n"
+            )
+            f.write("1 -1.0    !first S-level (sigma-coordinate must be -1)\n")
+            f.write("2 0.0     !last sigma-coordinate must be 0\n")
+            f.write(
+                "!for 3D, would have the levels index and sigma coordinate for each level\n"
+            )
+        self._copied = dest
+        return dest
+
+
+class WWMBNDGR3Generator(GeneratorBase):
+    hgrid: DataBlob | Path = Field(..., description="Path to hgrid.gr3 file")
+    bcflags: list[int] = Field(
+        None,
+        description="List of boundary condition flags. This replicates the functionality of the gen_wwmbnd.in file. Must be the same length as the number of open boundaries in the hgrid.gr3 file. If not specified, it is assumed that all open hgrid files are open to waves",
+    )
+
+    def generate(self, destdir: str | Path, name: str = None) -> Path:
+        # Adapted from https://github.com/schism-dev/schism/blob/master/src/Utility/Pre-Processing/gen_wwmbnd.f90
+        # Read input files
+        if isinstance(self.hgrid, DataBlob):
+            if not self.hgrid._copied:
+                self.hgrid.get(destdir, name="hgrid.gr3")
+            ref = self.hgrid._copied
+        else:
+            ref = self.hgrid
+
+        with open(ref, "r") as file:
+            file.readline()
+            ne, nnp = map(int, file.readline().split())
+            xnd, ynd, ibnd, nm = (
+                np.zeros(nnp),
+                np.zeros(nnp),
+                np.zeros(nnp),
+                np.zeros((ne, 3), dtype=int),
+            )
+            ibnd.fill(0)
+
+            for i in range(nnp):
+                j, xnd[i], ynd[i], tmp = map(float, file.readline().split())
+
+            for i in range(ne):
+                j, k, *nm[i, :] = map(int, file.readline().split())
+
+            nope = int(file.readline().split()[0].strip())
+
+            bcflags = self.bcflags or np.ones(nope, dtype=int) * 2
+            nope2 = len(bcflags)
+            ifl_wwm = np.array(bcflags, dtype=int)
+
+            if nope != nope2:
+                raise ValueError(
+                    f"List of flags {nope2} must be the same length as the number of open boundaries in the hgrid.gr3 file ({nope})"
+                )
+
+            neta = int(file.readline().split()[0].strip())
+
+            for k in range(nope):
+                nond = int(file.readline().split()[0].strip())
+                for _ in range(nond):
+                    iond = int(file.readline().strip())
+                    if iond > nnp or iond <= 0:
+                        raise ValueError("iond > nnp")
+
+                    ibnd[iond - 1] = ifl_wwm[k]
+
+        # Write output file
+        dest = Path(destdir) / "wwmbnd.gr3"
+        with open(dest, "w") as file:
+            file.write("Generated by rompy\n")
+            file.write(f"{ne} {nnp}\n")
+            for i in range(nnp):
+                file.write(f"{i+1} {xnd[i]} {ynd[i]} {float(ibnd[i])}\n")
+
+            for i in range(ne):
+                file.write(f"{i+1} 3 {' '.join(map(str, nm[i, :]))}\n")
+        self._copied = dest
+        return dest
+
+
+class GridLinker(GeneratorBase):
+    hgrid: DataBlob | Path = Field(..., description="Path to hgrid.gr3 file")
+    gridtype: str = Field(..., description="Type of grid to link")
+
+    @field_validator("gridtype")
+    @classmethod
+    def gridtype_validator(cls, v):
+        if v not in GRIDLINKS:
+            raise ValueError(f"gridtype must be one of {GRIDLINKS}")
+        return v
+
+    def generate(self, destdir: str | Path, name: str = None) -> Path:
+        if isinstance(self.hgrid, DataBlob):
+            if not self.hgrid._copied:
+                self.hgrid.get(destdir, name="hgrid.gr3")
+            ref = self.hgrid._copied.name
+        else:
+            ref = self.hgrid
+        if self.gridtype == "hgridll":
+            filename = "hgrid.ll"
+        elif self.gridtype == "hgrid_WWM":
+            filename = "hgrid_WWM.gr3"
+        dest = Path(destdir) / f"{filename}"
+        logger.info(f"Linking {ref} to {dest}")
+        dest.symlink_to(ref)
+        return dest
 
 
 # TODO - check datatypes for gr3 files (int vs float)
 class SCHISMGrid(BaseGrid):
-    """2D SCHISM grid in geographic space."""
+    """SCHISM grid in geographic space."""
 
     grid_type: Literal["schism"] = Field("schism", description="Model descriminator")
-    hgrid: DataBlob = Field(
-        ..., description="Path to hgrid.gr3 file"
-    )  # TODO always need. Follow up with Vanessa
-    vgrid: Optional[DataBlob] = Field(default=None, description="Path to vgrid.in file")
-    drag: Optional[DataBlob | float] = Field(
+    hgrid: DataBlob = Field(..., description="Path to hgrid.gr3 file")
+    vgrid: Optional[DataBlob | VgridGenerator] = Field(
+        default=None,
+        description="Path to vgrid.in file",
+        validate_default=True,
+    )
+    drag: Optional[DataBlob | float | GR3Generator] = Field(
         default=None, description="Path to drag.gr3 file"
     )
-    rough: Optional[DataBlob | float] = Field(
+    rough: Optional[DataBlob | float | GR3Generator] = Field(
         default=None, description="Path to rough.gr3 file"
     )
-    manning: Optional[DataBlob | float] = Field(
+    manning: Optional[DataBlob | float | GR3Generator] = Field(
         default=None,
         description="Path to manning.gr3 file",  # TODO treat in the same way as the other gr3 files. Add a warning that this is not advisable
     )
-    hgridll: Optional[DataBlob | int] = Field(
-        default=None, description="Path to hgrid.ll file. "
+    hgridll: Optional[DataBlob | int | GridLinker] = Field(
+        default=None,
+        description="Path to hgrid.ll file",
+        validate_default=True,
     )
-    diffmin: Optional[DataBlob | float] = Field(
+    diffmin: Optional[DataBlob | float | GR3Generator] = Field(
         default=1.0e-6,
         description="Path to diffmax.gr3 file or constant value",
         validate_default=True,
     )
-    diffmax: Optional[DataBlob | float] = Field(
+    diffmax: Optional[DataBlob | float | GR3Generator] = Field(
         default=1.0,
         description="Path to diffmax.gr3 file or constant value",
         validate_default=True,
     )
-    albedo: Optional[DataBlob | float] = Field(
+    albedo: Optional[DataBlob | float | GR3Generator] = Field(
         default=0.15,
         description="Path to albedo.gr3 file or constant value",
         validate_default=True,
     )
-    watertype: Optional[DataBlob | int] = Field(
+    watertype: Optional[DataBlob | int | GR3Generator] = Field(
         default=1,
         description="Path to watertype.gr3 file or constant value",
         validate_default=True,
     )
-    windrot_geo2proj: Optional[DataBlob | float] = Field(
+    windrot_geo2proj: Optional[DataBlob | float | GR3Generator] = Field(
         default=0.0,
         description="Path to windrot_geo2proj.gr3 file or constant value",
         validate_default=True,
     )
-    hgrid_WWM: Optional[DataBlob | int] = Field(
-        default=None, description="Path to hgrid_WWM.gr3 file"
+    hgrid_WWM: Optional[DataBlob | GridLinker] = Field(
+        default=None,
+        description="Path to hgrid_WWM.gr3 file",
+        validate_default=True,
     )
-    wwmbnd: Optional[DataBlob | int] = Field(
+    wwmbnd: Optional[DataBlob | WWMBNDGR3Generator] = Field(
         default=None,
         description="Path to wwmbnd.gr3 file",  # This is generated on the fly. Script sent from Vanessa.
+        validate_default=True,
     )
     crs: str = Field("epsg:4326", description="Coordinate reference system")
     _pyschism_hgrid: Optional[Hgrid] = None
@@ -137,27 +284,35 @@ class SCHISMGrid(BaseGrid):
             raise ValueError("At least one of rough, drag, manning must be set")
         return v
 
-    # validator that checks for gr3 source and if if not a daba blob or GR3Input, initializes a GR3Generator
-    @field_validator(
-        "drag",
-        "rough",
-        "manning",
-        "hgridll",
-        "diffmin",
-        "diffmax",
-        "albedo",
-        "watertype",
-        "windrot_geo2proj",
-        "hgrid_WWM",
-        "wwmbnd",
-        mode="after",
-    )
+    @field_validator(*G3FILES)
+    @classmethod
     def gr3_source_validator(cls, v, values):
         if v is not None:
             if not isinstance(v, DataBlob):
                 v = GR3Generator(
                     hgrid=values.data["hgrid"], gr3_type=values.field_name, value=v
                 )
+        return v
+
+    @field_validator(*GRIDLINKS)
+    @classmethod
+    def gridlink_validator(cls, v, values):
+        if v is None:
+            v = GridLinker(hgrid=values.data["hgrid"], gridtype=values.field_name)
+        return v
+
+    @field_validator("wwmbnd")
+    @classmethod
+    def wwmbnd_validator(cls, v, values):
+        if v is None:
+            v = WWMBNDGR3Generator(hgrid=values.data["hgrid"])
+        return v
+
+    @field_validator("vgrid")
+    @classmethod
+    def vgrid_validator(cls, v, values):
+        if v is None:
+            v = VgridGenerator()
         return v
 
     @model_validator(mode="after")
@@ -193,29 +348,13 @@ class SCHISMGrid(BaseGrid):
 
     def get(self, destdir: Path) -> dict:
         ret = {}
-        for filetype in [
-            "hgrid",
-            "vgrid",
-            "drag",
-            "rough",
-            "manning",
-            "diffmin",
-            "diffmax",
-            "hgridll",
-            "hgrid_WWM",
-            "wwmbnd",
-            "albedo",
-            "watertype",
-            "windrot_geo2proj",
-        ]:
+        for filetype in G3FILES + ["hgrid"]:
             source = getattr(self, filetype)
-            if filetype == "hgridll":
-                if source is None:
-                    logger.info(f"Creating symbolic link for hgrid.ll")
-                    os.symlink("./hgrid.gr3", f"{destdir}/hgrid.ll")
-                    continue
             if source is not None:
-                source.get(destdir)
+                ret[filetype] = source.get(destdir, name=f"{filetype}.gr3")
+        for filetype in GRIDLINKS + ["vgrid", "wwmbnd"]:
+            source = getattr(self, filetype)
+            ret[filetype] = source.get(destdir)
         self.generate_tvprop(destdir)
         return ret
 
@@ -226,15 +365,16 @@ class SCHISMGrid(BaseGrid):
             destdir (Path): Destination directory
 
         Returns:
-            Path: Path to tvprop.in file
+            iath: Path to tvprop.in file
         """
         # TODO - should this be handled in the same way as the gr3 files? i.e. would you
         # ever want to provide a file path to tvprop.in?
         tvdflag = Tvdflag(
             self.pyschism_hgrid, np.array([1] * len(self.pyschism_hgrid.elements))
         )
-        tvdflag.write(destdir / "tvprop.in")
-        return destdir / "tvprop.in"
+        dest = destdir / "tvd.prop"
+        tvdflag.write(dest)
+        return dest
 
     def boundary(self, tolerance=None) -> Polygon:
         bnd = self.pyschism_hgrid.boundaries.open.get_coordinates()
@@ -343,6 +483,9 @@ class SCHISMGrid(BaseGrid):
         bnd = self.pyschism_hgrid.boundaries.land.get_coordinates()
         return bnd.x.values, bnd.y.values
 
+    def boundary_points(self, spacing=None) -> tuple:
+        return self.ocean_boundary()
+
 
 if __name__ == "__main__":
     import cartopy.crs as ccrs
@@ -362,4 +505,3 @@ if __name__ == "__main__":
     # # plot polygon on cartopy axes
     # ax.add_geometries([bnd], ccrs.PlateCarree(), facecolor="none", edgecolor="red")
     # ax.coastlines()
-    plt.show()

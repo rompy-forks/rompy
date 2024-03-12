@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Optional, Union
 
@@ -31,6 +32,7 @@ class SfluxSource(DataGrid):
         default="sflux",
         description="Model type discriminator",
     )
+    id: str = Field("sflux_source", description="id of the source")
     relative_weight: float = Field(
         1.0,
         description="relative weight of the source file if two files are provided",
@@ -43,19 +45,23 @@ class SfluxSource(DataGrid):
         True, description="Fail if the source file is missing"
     )
     id: str = Field(None, description="id of the source", choices=["air", "rad", "prc"])
+    time_buffer: list[int] = Field(
+        default=[0, 1],
+        description="Number of source data timesteps to buffer the time range if `filter_time` is True",
+    )
 
     @property
     def outfile(self) -> str:
         # TODO - filenumber is. Hardcoded to 1 for now.
-        return f'sflux_{self.id}.{str(1).rjust(4, "0")}.nc'
+        return f'{self.id}.{str(1).rjust(4, "0")}.nc'
 
     @property
     def namelist(self) -> dict:
-        ret = {}
+        ret = self.model_dump()
         for key, value in self.model_dump().items():
             if key in ["relative_weight", "max_window_hours", "fail_if_missing"]:
                 ret.update({f"{self.id}_{key}": value})
-        ret.update({f"{self.id}_file": self.outfile})
+        ret.update({f"{self.id}_file": self.id})
         return ret
 
     @property
@@ -64,11 +70,13 @@ class SfluxSource(DataGrid):
         ds = self.source.open(
             variables=self.variables, filters=self.filter, coords=self.coords
         )
-        dt = total_seconds((ds.time[1] - ds.time[0]).values)
-        times = np.arange(0, ds.time.size) * dt
-        ds.time.assign_attrs({"long_name": "simulation_time"})
+        # rename latitude and longitide to lat and lon
+        ds = ds.rename_dims({self.coords.y: "ny_grid", self.coords.x: "nx_grid"})
+        lon, lat = np.meshgrid(ds[self.coords.x], ds[self.coords.y])
+        ds["lon"] = (("ny_grid", "nx_grid"), lon)
+        ds["lat"] = (("ny_grid", "nx_grid"), lat)
         basedate = pd.to_datetime(ds.time.values[0])
-        ds["time"] = times
+        unit = f"days since {basedate.strftime('%Y-%m-%d %H:%M:%S')}"
         ds.time.attrs = {
             "long_name": "Time",
             "standard_name": "time",
@@ -84,8 +92,10 @@ class SfluxSource(DataGrid):
                     ]
                 )
             ),
-            "units": f"days since {basedate.strftime('%Y-%m-%d %H:%M:%S')}",
+            # "units": unit,
         }
+        ds.time.encoding["units"] = unit
+        ds.time.encoding["calendar"] = "proleptic_gregorian"
         return ds
 
 
@@ -96,24 +106,24 @@ class SfluxAir(SfluxSource):
         default="sflux_air",
         description="Model type discriminator",
     )
-    uwind_name: SfluxSource = Field(
-        None,
+    uwind_name: str = Field(
+        "u10",
         description="name of zonal wind variable in source",
     )
-    vwind_name: SfluxSource = Field(
-        None,
+    vwind_name: str = Field(
+        "v10",
         description="name of meridional wind variable in source",
     )
-    prmsl_name: SfluxSource = Field(
-        None,
+    prmsl_name: str = Field(
+        "mslp",
         description="name of mean sea level pressure variable in source",
     )
-    stmp_name: SfluxSource = Field(
-        None,
+    stmp_name: str = Field(
+        "stmp",
         description="name of surface air temperature variable in source",
     )
     spfh_name: SfluxSource = Field(
-        None,
+        "spfh",
         description="name of specific humidity variable in source",
     )
 
@@ -127,6 +137,28 @@ class SfluxAir(SfluxSource):
         ]:
             if getattr(self, variable) is not None:
                 self.variables.append(getattr(self, variable))
+
+    @property
+    def ds(self):
+        """Return the xarray dataset for this data source."""
+        ds = super().ds
+        for variable in [
+            "uwind_name",
+            "vwind_name",
+            "prmsl_name",
+            "stmp_name",
+            "spfh_name",
+        ]:
+            data_var = getattr(self, variable)
+            if data_var not in ds.data_vars:
+                ds[data_var] = ds[self.uwind_name].copy()
+                if variable == "spfh_name":
+                    missing = 0.01
+                else:
+                    missing = -999
+                ds[data_var][:, :, :] = missing
+                ds.data_vars[data_var].attrs["long_name"] = data_var
+        return ds
 
 
 class SfluxRad(SfluxSource):
@@ -172,12 +204,12 @@ class SCHISMDataSflux(RompyBaseModel):
         default="sflux",
         description="Model type discriminator",
     )
-    air_1: SfluxSource = Field(None, description="sflux air source 1")
-    air_2: SfluxSource = Field(None, description="sflux air source 2")
-    rad_1: SfluxSource = Field(None, description="sflux rad source 1")
-    rad_2: SfluxSource = Field(None, description="sflux rad source 2")
-    prc_1: SfluxSource = Field(None, description="sflux prc source 1")
-    prc_2: SfluxSource = Field(None, description="sflux prc source 2")
+    air_1: SfluxAir = Field(None, description="sflux air source 1")
+    air_2: SfluxAir = Field(None, description="sflux air source 2")
+    rad_1: SfluxRad = Field(None, description="sflux rad source 1")
+    rad_2: SfluxRad = Field(None, description="sflux rad source 2")
+    prc_1: SfluxPrc = Field(None, description="sflux prc source 1")
+    prc_2: SfluxPrc = Field(None, description="sflux prc source 2")
 
     def get(
         self,
@@ -196,15 +228,18 @@ class SCHISMDataSflux(RompyBaseModel):
             Path: The path to the written sflux data.
 
         """
+        destdir = Path(destdir) / "sflux"
+        destdir.mkdir(parents=True, exist_ok=True)
         namelistargs = {}
         for variable in ["air_1", "air_2", "rad_1", "rad_2", "prc_1", "prc_2"]:
             data = getattr(self, variable)
             if data is None:
                 continue
+            data.id = variable
             logger.info(f"Fetching {variable}")
             namelistargs.update(data.namelist)
             data.get(destdir, grid, time)
-        Sflux_Inputs(**namelistargs).write_nml(destdir / "sflux")
+        Sflux_Inputs(**namelistargs).write_nml(destdir)
 
     @model_validator(mode="after")
     def check_weights(v):
@@ -243,9 +278,17 @@ class SCHISMDataWave(BoundaryWaveStation):
         default="wave",
         description="Model type discriminator",
     )
-    sel_method_kwargs: dict = Field(
-        default={"method": "nearest", "unique": True},
+    sel_method: dict = Field(
+        default="nearest",
         description="Keyword arguments for sel_method",
+    )
+    sel_method_kwargs: dict = Field(
+        default={"unique": True},
+        description="Keyword arguments for sel_method",
+    )
+    time_buffer: list[int] = Field(
+        default=[0, 1],
+        description="Number of source data timesteps to buffer the time range if `filter_time` is True",
     )
 
     def get(
@@ -302,11 +345,35 @@ class SCHISMDataBoundary(DataBoundary):
             "Xarray method to use for selecting boundary points from the dataset"
         ),
     )
+    interpolate_missing_coastal: bool = Field(
+        True, description="interpolate_missing coastal data points"
+    )
+    time_buffer: list[int] = Field(
+        default=[0, 1],
+        description="Number of source data timesteps to buffer the time range if `filter_time` is True",
+    )
 
     @model_validator(mode="after")
     def _set_variables(self) -> "SCHISMDataBoundary":
         self.variables = [self.variable]
         return self
+
+    # @property
+    # def ds(self):
+    #     """Return the xarray dataset for this data source."""
+    #     # I don't like this approach, as its no longer lazy
+    #     ds = super().ds
+    #     if self.extrapolate_to_coast:
+    #         for var in ds.data_vars:
+    #             ds[var] = (
+    #                 ds[var].interpolate_na(
+    #                     method="linear", fill_value="extrapolate", dim=self.coords.x
+    #                 )
+    #                 + ds[var].interpolate_na(
+    #                     method="linear", fill_value="extrapolate", dim=self.coords.y
+    #                 )
+    #             ) / 2
+    #     return ds
 
     def get(
         self,
@@ -331,17 +398,30 @@ class SCHISMDataBoundary(DataBoundary):
 
         """
         # prepare xarray.Dataset and save forcing netCDF file
+        outfile = Path(destdir) / f"{self.id}.th.nc"
+        boundary_ds = self.boundary_ds(grid, time)
+        boundary_ds.to_netcdf(outfile, "w", "NETCDF3_CLASSIC", unlimited_dims="time")
+        return outfile
+
+    def boundary_ds(self, grid: SCHISMGrid, time: Optional[TimeRange]) -> xr.Dataset:
         logger.info(f"Fetching {self.id}")
         if self.crop_data and time is not None:
             self._filter_time(time)
         ds = self._sel_boundary(grid)
-        dt = total_seconds((ds.time[1] - ds.time[0]).values)
-        times = np.arange(0, ds.time.size) * dt
-        time_series = np.expand_dims(ds[self.variable].values, axis=(2, 3))
+        if len(ds.time) > 1:
+            dt = total_seconds((ds.time[1] - ds.time[0]).values)
+        else:
+            dt = 3600
+
+        data = ds[self.variable].values
+        if self.interpolate_missing_coastal:
+            for i in range(data.shape[0]):
+                data[i, :] = fill_tails(data[i, :])
+        time_series = np.expand_dims(data, axis=(2, 3))
 
         schism_ds = xr.Dataset(
             coords={
-                "time": times,
+                "time": ds.time,
                 "nOpenBndNodes": np.arange(0, ds.xlon.size),
                 "nComponents": np.array([1]),
                 "one": np.array([1]),
@@ -355,15 +435,46 @@ class SCHISMDataBoundary(DataBoundary):
             },
         )
         schism_ds.time_step.assign_attrs({"long_name": "time_step"})
-        schism_ds.time.assign_attrs({"long_name": "simulation_time"})
-        schism_ds.time_series.assign_attrs(
-            {"long_name": ds[self.variable].attrs["long_name"]}
-        )
-        outfile = (
-            Path(destdir) / f"{self.id}.th.nc"
-        )  # the two is just a temporary fix to stop clash with tides
-        schism_ds.to_netcdf(outfile)
-        return outfile
+        basedate = pd.to_datetime(ds.time.values[0])
+        unit = f"days since {basedate.strftime('%Y-%m-%d %H:%M:%S')}"
+        schism_ds.time.attrs = {
+            "long_name": "Time",
+            "standard_name": "time",
+            "base_date": np.int32(
+                np.array(
+                    [
+                        basedate.year,
+                        basedate.month,
+                        basedate.day,
+                        basedate.hour,
+                        basedate.minute,
+                        basedate.second,
+                    ]
+                )
+            ),
+            # "units": unit,
+        }
+        schism_ds.time.encoding["units"] = unit
+        schism_ds.time.encoding["calendar"] = "proleptic_gregorian"
+        if schism_ds.time_series.isnull().any():
+            msg = "Some values are null. This will cause SCHISM to crash. Please check your data."
+            logger.warning(msg)
+        return schism_ds
+
+
+def fill_tails(arr):
+    """If the tails of  1d array are nan, fill with the last non nan value."""
+    mask = np.isnan(arr)
+    idx = np.where(~mask, np.arange(mask.shape[0]), 0)
+    np.maximum.accumulate(idx, axis=0, out=idx)
+    out = arr[idx]
+    # repoat the same from the other end
+    reverse = out[::-1]
+    mask = np.isnan(reverse)
+    idx = np.where(~mask, np.arange(mask.shape[0]), 0)
+    np.maximum.accumulate(idx, axis=0, out=idx)
+    out = reverse[idx]
+    return out[::-1]
 
 
 class SCHISMDataOcean(RompyBaseModel):
@@ -434,20 +545,6 @@ class SCHISMDataOcean(RompyBaseModel):
         return f"SCHISMDataOcean"
 
 
-# def setup_bctides():
-#     # Taken from example at https://schism-dev.github.io/schism/master/getting-started/pre-processing-with-pyschism/boundary.html I don't really understand this
-#     # Ultimately these will not wanted to be hardcoded.
-#     iet3 = iettype.Iettype3(constituents="major", database="tpxo")
-#     iet4 = iettype.Iettype4()
-#     iet5 = iettype.Iettype5(iettype3=iet3, iettype4=iet4)
-#     ifl3 = ifltype.Ifltype3(constituents="major", database="tpxo")
-#     ifl4 = ifltype.Ifltype4()
-#     ifl5 = ifltype.Ifltype5(ifltype3=ifl3, ifltype4=ifl4)
-#     # isa3 = isatype.Isatype4()
-#     # ite3 = itetype.Itetype4()
-#     return ifl5, iet5
-
-
 class TidalDataset(RompyBaseModel):
     data_type: Literal["tidal_dataset"] = Field(
         default="tidal_dataset",
@@ -484,7 +581,7 @@ class SCHISMDataTides(RompyBaseModel):
         50.0,
         description="cutoff depth for tides",
     )
-    flags: Optional[list] = Field([[5, 5, 4, 4]], description="nested list of bctypes")
+    flags: Optional[list] = Field([[5, 3, 0, 0]], description="nested list of bctypes")
     constituents: Union[str, list] = Field("major", description="constituents")
     database: str = Field("tpxo", description="database", choices=["tpxo", "fes2014"])
     add_earth_tidal: bool = Field(True, description="add_earth_tidal")
@@ -574,10 +671,21 @@ class SCHISMData(RompyBaseModel):
         time: Optional[TimeRange] = None,
     ) -> None:
         ret = {}
+        # if time:
+        #     # Bump enddate by 1 hour to make sure we get the last time step
+        #     time = TimeRange(
+        #         start=time.start,
+        #         end=time.end + timedelta(hours=1),
+        #         interval=time.interval,
+        #         include_end=time.include_end,
+        #     )
         for datatype in ["atmos", "ocean", "wave", "tides"]:
             data = getattr(self, datatype)
             if data is None:
                 continue
             output = data.get(destdir, grid, time)
             ret.update({datatype: output})
+            # ret[
+            #     "wave"
+            # ] = "dummy"  # Just to make cookiecutter happy if excluding wave forcing
         return ret

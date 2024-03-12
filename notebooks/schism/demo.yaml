@@ -1,40 +1,34 @@
 output_dir: schism_declaritive
 period:
   start: 20230101T00
-  end: 20230102T00
+  end: 20230101T12
   interval: 3600
 run_id: test_schism
 config:
   model_type: schismcsiro
+  mesbf: 1
+  fricc: 0.067
   grid:
     grid_type: schism
     hgrid:
       id: hgrid
       model_type: data_blob
-      source: ../../tests/schism/test_data/hgrid.gr3
-    manning:
-      model_type: data_blob
-      source: ../../tests/schism/test_data/manning.gr3
-    hgrid_WWM:
-      model_type: data_blob
-      source: ../../tests/schism/test_data/hgrid_WWM.gr3
-    wwmbnd:
-      model_type: data_blob
-      source: ../../tests/schism/test_data/wwmbnd.gr3
+        #source: ../../tests/schism/test_data/hgrid.gr3
+      source: ../../tests/schism/test_data/hgrid_20kmto60km_rompyschism_testing.gr3
+    manning: 1
   data:
     data_type: schism
     atmos:
       air_1:
-        buffer: 0.0
-        id: era5
         source: 
-          uri:  ../../tests/data/era5-20230101.nc
+          uri:  ../../tests/schism/test_data/atmos.nc
           model_type: open_dataset
-          filter:
-            sort: {coords: [latitude]}
-        variables: 
-          - u10
-          - v10
+        uwind_name: u10
+        vwind_name: v10
+        prml_name: mslp
+        filter:
+          sort: {coords: [latitude]}
+        buffer: 5
     ocean:
       elev2D:
         buffer: 0.0
@@ -44,14 +38,21 @@ config:
           y: ylat
           z: depth
         source: 
-          uri:  ../../tests/schism/test_data/hycom20230101.nc
+          uri:  ../../tests/schism/test_data/hycom.nc
           model_type: open_dataset
         variable: surf_el
-    # tides:
-    #   cutoff_depth: 50.0
-    #   tidal_data:
-    #     elevations: ../../tests/schism/test_data/tides/h_m2s2n2k2k1o1p1q1mmmfm4mn4ms42n2s12q1j1l2m3mu2nu2oo1.nc
-    #     velocities: ../../tests/schism/test_data/tides/u_m2s2n2k2k1o1p1q1mmmfm4mn4ms42n2s12q1j1l2m3mu2nu2oo1.nc
+    tides:
+      constituents:
+      - M2
+      - S2
+      - N2
+      cutoff_depth: 50.0
+      flags: 
+        - [5, 3, 0, 0]
+      tidal_data:
+        data_type: tidal_dataset
+        elevations: ../../tests/schism/test_data/tpxo9-neaus/h_m2s2n2.nc
+        velocities: ../../tests/schism/test_data/tpxo9-neaus/u_m2s2n2.nc
     wave:
       buffer: 0.0
       coords:
@@ -60,7 +61,6 @@ config:
         y: lat
         z: depth
       id: wavedata
-      sel_method: nearest
       source:
         catalog_uri: ../../tests/data/catalog.yaml
         dataset_id: ausspec
