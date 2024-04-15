@@ -41,7 +41,7 @@
  FRLOW          = 0.04               ! Low frequency limit of the discrete wave period (Hz; 1/period) if 24, use 0.04
  FRHIGH         = 1.                 ! High frequency limit of the discrete wave period.
  MSC            = {{config.msc2}}                 ! Number of frequency bins
- FILEGRID       = '{{config.grid.hgrid_WWM.source.name}}'    ! Name of the grid file. hgrid_WWM.gr3 if IGRIDTYPE = 3 (SCHISM)
+ FILEGRID       = '{{config.grid.hgrid_WWM.name}}'    ! Name of the grid file. hgrid_WWM.gr3 if IGRIDTYPE = 3 (SCHISM)
  IGRIDTYPE      = 3                  ! Gridtype used.
                                      ! 1 ~ XFN system.dat
                                      ! 2 ~ WWM-PERIODIC
@@ -54,8 +54,8 @@
 /
 
 &INIT
- LHOTR          = F                  ! Use hotstart file (see &HOTFILE section)
- LINID          = T                  ! Initial condition; F for default; use T if using WW3 as i.c. etc
+ LHOTR          = {{config.wwminput_LHOTR}}                  ! Use hotstart file (see &HOTFILE section)
+ LINID          = {{config.wwminput_LINID}}                ! Initial condition; F for default; use T if using WW3 as i.c. etc
  INITSTYLE      = 2                  ! 1 - Parametric Jonswap, 2 - Read from Global NETCDF files, work only if IBOUNDFORMAT=3/6
 /
 
@@ -71,12 +71,12 @@
  DELTC          = 1                  ! Time step in FILEWAVE 
  UNITC          = 'HR'               ! Unit can be HR, MIN, SEC 
  ENDTC          = '{{runtime.period.end.strftime("%Y%m%d.%H%M%S")}}'  ! End time
- FILEBOUND      = '{{config.grid.wwmbnd.source.name}}'       ! Boundary file defining boundary conditions and Neumann nodes.
+ FILEBOUND      = '{{config.grid.wwmbnd.name}}'       ! Boundary file defining boundary conditions and Neumann nodes.
                                      ! In this file there is following definition Flag 0: not on boundary; 3: Neumann (0 gradient only for advection part);
                                      ! 2: active bnd (Dirichlet). Bnd flags imported from SCHISM: ! 1: exterior bnd; -1: interior (islands)
                                      ! exterior and interior boundaries need not to be defined.
  IBOUNDFORMAT   = 6                  ! 1 ~ WWM, 2 ~bulk parameters (5 nc files) 6 ~ WW3 (2D spectra in netcdf format only). WW3 works only with LBCWA=T.
- FILEWAVE       = '{{config.wave}}'        !'schism_bnd_spec_forSCHISM_2021Aug-Oct_SWANmad0p17.nc'     !'ww3.20190506_spec.nc'  ! Boundary file defining boundary input from WW3
+ FILEWAVE       = '{{config.wave.name}}'        !'schism_bnd_spec_forSCHISM_2021Aug-Oct_SWANmad0p17.nc'     !'ww3.20190506_spec.nc'  ! Boundary file defining boundary input from WW3
  LINDSPRDEG     = {{config.lindsprdeg}}                  ! If 1-d wave spectra are read this flag defines whether the input for the directional spreading is in degrees (true) or exponent (false)
  LPARMDIR       = F                  ! If LPARMDIR is true then directional spreading is read from WBDS and must be in exponential format at this time, only valid for 1d Spectra
                                      ! For WW3 boundary input also set LINHOM=T, LBCSE=T and this works only for spherical coordinates
@@ -382,7 +382,8 @@
                                      ! then only one file is generated
                                      ! otherwise, for example for 86400
                                      ! daily output files are created.
- OUTSTYLE       = '{{config.outstyle}}'              ! output option - use 'NO' for no output
+ ! OUTSTYLE       = '{{config.outstyle}}'              ! output option - use 'NO' for no output
+ OUTSTYLE       = {{config.wwminput_history_OUTSTYLE}} ! output option - use 'NO' for no output
                                      ! 'NC' for netcdf output
                                      ! 'XFN' for XFN output (default)
                                      ! 'SHP' for DARKO SHP output
@@ -437,14 +438,14 @@
  WATLEV         = F                  ! water level
  WATLEVOLD      = F                  ! water level at previous time step
  DEPDT          = F                  ! change of water level in time
- DEP            = F                  ! depth
- TAUW           = T                  ! surface stress from the wave
- TAUHF          = T                  ! high frequency surface stress
- TAUTOT         = T                  ! total surface stress
- STOKESSURFX    = T                  ! Surface Stokes drift in X direction
- STOKESSURFY    = T                  ! Surface Stokes drift in Y direction
- STOKESBAROX    = T                  ! Barotropic Stokes drift in X direction
- STOKESBAROY    = T                  ! Barotropic Stokes drift in Y direction
+ DEP            = {{config.wwminput_history_DEP}}                  ! depth
+ TAUW           = {{config.wwminput_history_TAUW}}                  ! surface stress from the wave
+ TAUHF          = {{config.wwminput_history_TAUHF}}                  ! high frequency surface stress
+ TAUTOT         = {{config.wwminput_history_TAUTOT}}                  ! total surface stress
+ STOKESSURFX    = {{config.wwminput_history_STOKESSURFX}}                 ! Surface Stokes drift in X direction
+ STOKESSURFY    = {{config.wwminput_history_STOKESSURFY}}                  ! Surface Stokes drift in Y direction
+ STOKESBAROX    = {{config.wwminput_history_STOKESBAROX}}                  ! Barotropic Stokes drift in X direction
+ STOKESBAROY    = {{config.wwminput_history_STOKESBAROY}}                   ! Barotropic Stokes drift in Y direction
  RSXX           = F                  ! RSXX potential of LH
  RSXY           = F                  ! RSXY potential of LH
  RSYY           = F                  ! RSYY potential of LH
@@ -465,7 +466,7 @@
                                      ! then only one file is generated
                                      ! otherwise, for example for 86400
                                      ! daily output files are created.
- OUTSTYLE       = 'NC'               ! output option
+ OUTSTYLE       = '{{config.wwminput_station_OUTSTYLE}}'               ! output option
                                      ! 'NO' no output
                                      ! 'STE' classic station output (default)
                                      ! 'NC' for netcdf output
@@ -527,14 +528,14 @@
  WATLEV         = F                  ! water level
  WATLEVOLD      = F                  ! water level at previous time step
  DEPDT          = F                  ! change of water level in time
- DEP            = T                  ! depth
- TAUW           = T                  ! surface stress from the wave
- TAUHF          = T                  ! high frequency surface stress
- TAUTOT         = T                  ! total surface stress
- STOKESSURFX    = T                  ! Surface Stokes drift in X direction
- STOKESSURFY    = T                  ! Surface Stokes drift in X direction
- STOKESBAROX    = T                  ! Barotropic Stokes drift in X direction
- STOKESBAROY    = T                  ! Barotropic Stokes drift in Y direction
+ DEP            = {{config.wwminput_station_DEP}}                  ! depth
+ TAUW           = {{config.wwminput_station_TAUW}}                  ! surface stress from the wave
+ TAUHF          = {{config.wwminput_station_TAUHF}}                  ! high frequency surface stress
+ TAUTOT         = {{config.wwminput_station_TAUTOT}}                  ! total surface stress
+ STOKESSURFX    = {{config.wwminput_station_STOKESSURFX}}                 ! Surface Stokes drift in X direction
+ STOKESSURFY    = {{config.wwminput_station_STOKESSURFY}}                  ! Surface Stokes drift in Y direction
+ STOKESBAROX    = {{config.wwminput_station_STOKESBAROX}}                  ! Barotropic Stokes drift in X direction
+ STOKESBAROY    = {{config.wwminput_station_STOKESBAROY}}                   ! Barotropic Stokes drift in Y direction
  RSXX           = F                  ! RSXX potential of LH
  RSXY           = F                  ! RSXY potential of LH
  RSYY           = F                  ! RSYY potential of LH
@@ -544,7 +545,7 @@
 /
 
 &HOTFILE
- LHOTF          = F                  ! Write hotfile
+ LHOTF          = {{config.wwminput_LHOTF}}                  ! Write hotfile
  FILEHOT_OUT    = 'wwm_hot_out'      !'.nc' suffix will be added 
  BEGTC          = '{{runtime.period.start.strftime("%Y%m%d.%H%M%S")}}'  !Starting time of hotfile writing. With ihot!=0 in SCHISM,
                                      !this will be whatever the new hotstarted time is (even with ihot=2)

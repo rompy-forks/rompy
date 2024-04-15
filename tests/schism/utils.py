@@ -1,5 +1,7 @@
 import logging
+import tarfile
 from datetime import datetime
+from glob import glob
 from pathlib import Path
 from time import time
 
@@ -19,8 +21,7 @@ logging.basicConfig(
     format="[%(asctime)s] %(name)s %(levelname)s: %(message)s",
     force=True,
 )
-logger = logging.getLogger("pyschism")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def download_hycom(dest=Path("./"), hgrid=Path("./hgrid.gr3")):
@@ -31,13 +32,14 @@ def download_hycom(dest=Path("./"), hgrid=Path("./hgrid.gr3")):
     hycom.fetch_data(date, rnday=2, bnd=False, nudge=False, sub_sample=5, outdir="./")
     print(f"It took {(time()-t0)/60} mins to download")
 
-    files = Path("./").glob("hycom_*.nc")
+    files = glob("hycom_*.nc")
+    files.sort()
     logging.info("Concatenating files...")
     xr.open_mfdataset(files, concat_dim="time", combine="nested")["surf_el"].to_netcdf(
         dest / "hycom.nc"
     )
     for file in files:
-        file.unlink()
+        os.remove(file)
 
 
 def compare_files(file1, file2):
@@ -46,3 +48,13 @@ def compare_files(file1, file2):
             for line1, line2 in zip(f1, f2):
                 if line1[0] != "$" and line2[0] != "$":
                     assert line1.rstrip() == line2.rstrip()
+
+
+def untar_file(file, dest=Path("./")):
+    logger.info(f"Extracting {file} to {dest}")
+    with tarfile.open(file) as tar:
+        tar.extractall(dest)
+
+
+if __name__ == "__main__":
+    untar_file("test_data/tpxo9-neaus.tar.gz", "test_data/")
