@@ -1,7 +1,4 @@
-import logging
 import os
-
-logger = logging.getLogger(__name__)
 
 # Define datasource types to be used. Note that including SourceDataset will break the
 # specification as this object cannot be serialised, but this does not cause any problems
