@@ -6,7 +6,7 @@ from wavespectra import read_swan
 from rompy.core.time import TimeRange
 from rompy.swan.grid import SwanGrid
 from rompy.core.source import SourceFile, SourceIntake
-from rompy.core.boundary import SourceWavespectra
+from rompy.core.source import SourceWavespectra
 from rompy.swan.boundary import Boundnest1, BoundspecSide, BoundspecSegmentXY
 
 
