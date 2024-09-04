@@ -4,7 +4,7 @@ import pytest
 import xarray as xr
 
 from rompy.core.types import DatasetCoords
-from rompy.core.data import SourceFile
+from rompy.core.source import SourceFile
 from rompy.swan.data import SwanDataGrid
 from rompy.swan.grid import SwanGrid
 
