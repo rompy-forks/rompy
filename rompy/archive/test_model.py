@@ -1,4 +1,5 @@
 """Test the base model class."""
+
 from rompy.model import Model
 
 

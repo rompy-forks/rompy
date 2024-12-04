@@ -1,4 +1,5 @@
 """Light interface to fsspec filesystem operations."""
+
 import os
 from pathlib import Path
 import logging

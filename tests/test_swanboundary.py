@@ -143,11 +143,10 @@ def test_boundspecsegmentxy_from_sides(tmp_path, time, grid):
         ),
         sel_method="nearest",
         sel_method_kwargs={"tolerance": 3.0},
-        location=
-            {
-                "model_type": "sides",
-                "sides": [{"side": "west"}, {"side": "south"}],
-            }
+        location={
+            "model_type": "sides",
+            "sides": [{"side": "west"}, {"side": "south"}],
+        },
     )
     cmds = bnd.get(destdir=tmp_path, grid=grid, time=time)
 
@@ -163,5 +162,5 @@ def test_source_wavespectra_ploting(tmp_path):
         sel_method="idw",
         sel_method_kwargs={"tolerance": 2.0},
         rectangle="closed",
-        coords={'x':'lon', 'y': 'lat'}
+        coords={"x": "lon", "y": "lat"},
     ).plot()
