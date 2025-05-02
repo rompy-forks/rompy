@@ -34,7 +34,7 @@ dependencies = [
     "click",
     "cloudpathlib",
     "cookiecutter>=2.6",
-    "dask",
+    "dask==2024.8.2",
     "fsspec",
     "geopandas",
     "h5py",
@@ -52,7 +52,8 @@ dependencies = [
     "scipy",
     "tqdm",
     "xarray",
-    "wavespectra",
+    #"wavespectra",
+    "wavespectra @ git+https://github.com/rompy-forks/wavespectra.git@master",
 ]
 dynamic = ["version"]
 
