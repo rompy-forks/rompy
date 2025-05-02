@@ -53,7 +53,7 @@ dependencies = [
     "tqdm",
     "xarray",
     #"wavespectra",
-    "wavespectra @ git+https://github.com/rompy-forks/wavespectra.git",
+    "wavespectra @ git+https://github.com/rompy-forks/wavespectra",
 ]
 dynamic = ["version"]
 
