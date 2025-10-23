@@ -1235,6 +1235,15 @@ class BLOCK(BaseWrite):
             "format by default (`unit=1`)"
         ),
     )
+    output_times: Optional[TimeRangeOpen] = Field(
+        default=None,
+        description=(
+            "Time specification if the user requires output at various times. If this "
+            "option is not specified data will be written using the complete time range"
+            "in times"
+        ),
+    )
+
 
     @field_validator("idla")
     @classmethod
@@ -1273,8 +1282,10 @@ class BLOCK(BaseWrite):
             repr += f"{output.upper()}"
         if self.unit is not None:
             repr += f"\nunit={self.unit}"
-        if self.times is not None:
+        if self.times is not None and self.output_times is None:
             repr += f"\nOUTPUT {self.times.render()}"
+        elif self.output_times is not None:
+            repr += f"\nOUTPUT {self.output_times.render()}"
         return repr
 
 
