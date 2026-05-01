@@ -170,7 +170,8 @@ class HOTFILE(BaseComponent):
     )
     fname: Path = Field(
         description="Name of the file to which the wave field is written",
-        max_length=36,
+        # Causes rompy validation to fail with an error about not being able to run len(fname) because fname is a PosixPath
+        #max_length=36,
     )
     format: Optional[Literal["free", "unformatted"]] = Field(
         default=None,
